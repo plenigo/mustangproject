@@ -93,6 +93,14 @@ public interface IZUGFeRDExportableItem extends IAbsoluteValueProvider{
 		return null;
 	}
 
+	/**
+	 * The price of one item incl. taxes excl. allowances and charges
+	 *
+	 * @return The price of one item incl. taxes excl. allowances and charges
+	 */
+	default BigDecimal getGrossPrice() {
+		return null;
+	}
 
 	/**
 	 * The price of one item excl. taxes
