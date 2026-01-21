@@ -1,3 +1,40 @@
+- 990
+- 859
+- 992
+- 994
+- 999
+- 997
+- 1000
+- deprecate itemTotalAllowances instead of itemAllowances oder itemCharges
+- #1011
+
+2.21.0
+=======
+2025-12-18
+
+- #969 Support Factur-X 1.08 / ZUGFeRD 2.4
+- #978 Subtotal validation in ZF 2.4 Extended
+- #952 Add optional Invoicer and Invoicee for Extended profile
+- #954 Parsing XML documents fails with ZUGFeRD visualizer due to secure processing not being functional
+- #947 replace fixed version number with new variable from root pom.xml
+- #984 set default vat exemtion reason text on reverse charge
+- #983 Be able to easily reference an invoice in a credit memo
+- #979, #985 allow vat percent=null sometimes
+- #977 Update History.md
+- 961/962 Adding a tax ExemptionReasonCode to Product/TradeTax for the XML generation
+- have a start of a primitive and incomplete list of human readable unit codes
+
+2.20.0
+=======
+2025-10-30
+
+- upgrade to pdfbox 3.0.6
+- #950 issues with nonshaded version: 2.19.1: ClassNotFoudException while running the PDFValidator
+- #959 Added FactoorSharp to the list of valid pdf sources
+- change return type of getCashDiscounts to CashDiscount object, not interface
+- #923 Support for BT-17 (tender or lot reference)
+- #960 incorrect calculation for product charges
+
 2.19.1
 =======
 2025-10-09
@@ -132,7 +169,7 @@ corrections
 - #707 invoiceimporter may fail if certain values are not set
 - #708 embedded files cannot be determined
 - #709 ZUGFeRDInvoiceImporter ignored "first" embedded file in list of pdf attachments
-- #607 Enable flexible PaymentReference and a DocumentName.
+- #607 Enable flexible PaymentReference and a DocumentName. **Important note:** The library’s behavior for generating ZUGFeRD 2 documents is not fully backward compatible. Except for the “Minimum” profile, BT‑83 was automatically populated with the document number in earlier versions. From this release onward, applications must explicitly set BT‑83.
 - #649 Reuse toPDF method to work without any dependencies to the file system
 - #650 Add net.sf.offo:fop-hyph
 - #665 Fix #632: Return ubl_creditnote as Standard for CreditNotes

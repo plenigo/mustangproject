@@ -646,7 +646,7 @@ public class ZUGFeRDExporterFromA3 extends XRExporter implements IZUGFeRDExporte
 	 *
 	 * @param trans a IZUGFeRDExportableTransaction that provides the data-model to
 	 *              populate the XML. This parameter may be null, if so the XML data
-	 *              should hav ebeen set via
+	 *              should have been set via
 	 *              <code>setZUGFeRDXMLData(byte[] zugferdData)</code>
 	 * @throws IOException if anything is wrong with already loaded PDF
 	 */
@@ -696,6 +696,7 @@ public class ZUGFeRDExporterFromA3 extends XRExporter implements IZUGFeRDExporte
 		if ((meta != null) && (meta.getLength() > 0)) {
 			try {
 				DomXmpParser xmpParser = new DomXmpParser();
+				xmpParser.setStrictParsing(false);
 				return xmpParser.parse(meta.toByteArray());
 			} catch (XmpParsingException e) {
 				throw new IOException(e);
