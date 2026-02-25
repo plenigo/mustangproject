@@ -20,11 +20,13 @@
  */
 package org.mustangproject.ZUGFeRD;
 
-import com.helger.commons.io.stream.StreamHelper;
-import javax.xml.XMLConstants;
-import javax.xml.parsers.ParserConfigurationException;
+import com.helger.base.io.stream.StreamHelper;
 import org.apache.commons.io.IOUtils;
-import org.apache.fop.apps.*;
+import org.apache.fop.apps.FOPException;
+import org.apache.fop.apps.FOUserAgent;
+import org.apache.fop.apps.Fop;
+import org.apache.fop.apps.FopFactory;
+import org.apache.fop.apps.FopFactoryBuilder;
 import org.apache.fop.apps.io.ResourceResolverFactory;
 import org.apache.fop.configuration.Configuration;
 import org.apache.fop.configuration.ConfigurationException;
@@ -38,17 +40,35 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.*;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.Result;
+import javax.xml.transform.Source;
+import javax.xml.transform.Templates;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.URIResolver;
 import javax.xml.transform.sax.SAXResult;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.transform.stream.StreamSource;
-import java.io.*;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -108,20 +128,14 @@ public class ZUGFeRDVisualizer {
 		//REDHAT
 		//https://www.blackhat.com/docs/us-15/materials/us-15-Wang-FileCry-The-New-Age-Of-XXE-java-wp.pdf
 		dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-		try
-		{
+		try {
 			dbf.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-		}
-		catch (IllegalArgumentException e)
-		{
+		} catch (IllegalArgumentException e) {
 			LOGGER.warn("Property: \"Access external DTD\" not supported.");
 		}
-		try
-		{
+		try {
 			dbf.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-		}
-		catch (IllegalArgumentException e)
-		{
+		} catch (IllegalArgumentException e) {
 			LOGGER.warn("Property: \"Access external schema\" not supported.");
 		}
 
@@ -258,7 +272,7 @@ public class ZUGFeRDVisualizer {
 		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
 			theStandard = findOutStandardFromRootNode(fis);
 		}
-		
+
 		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
 			return toFOP(fis, theStandard);
 		}
@@ -311,17 +325,18 @@ public class ZUGFeRDVisualizer {
 		} catch (TransformerException | IOException | ParserConfigurationException e) {
 			LOGGER.error("Failed to apply FOP", e);
 		}
-		
+
 		toPDFfromFOP(fopInput, () -> {
-				try {
-					return new FileOutputStream(pdfFilename);
-				} catch (FileNotFoundException e) {
-					LOGGER.error("Failed to create PDF", e);
-				}
+			try {
+				return new FileOutputStream(pdfFilename);
+			} catch (FileNotFoundException e) {
+				LOGGER.error("Failed to create PDF", e);
+			}
 			return null;
-		}, (OutputStream out) -> {});
+		}, (OutputStream out) -> {
+		});
 	}
-	
+
 	public byte[] toPDF(String xmlContent) {
 
 		String fopInput = null;
@@ -333,7 +348,7 @@ public class ZUGFeRDVisualizer {
 			ByteArrayInputStream fis = new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8));
 			EStandard theStandard = findOutStandardFromRootNode(fis);
 			fis = new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8));//rewind :-(
-			
+
 			fopInput = toFOP(fis, theStandard);
 		} catch (TransformerException | IOException | ParserConfigurationException e) {
 			LOGGER.error("Failed to apply FOP", e);
@@ -342,7 +357,7 @@ public class ZUGFeRDVisualizer {
 		AtomicReference<byte[]> byteHolder = new AtomicReference<>();
 		ByteArrayOutputStream os = new ByteArrayOutputStream();
 		toPDFfromFOP(fopInput, () -> new BufferedOutputStream(os), (OutputStream out) -> {
-			
+
 			try {
 				out.flush();
 			} catch (IOException e) {
@@ -350,10 +365,10 @@ public class ZUGFeRDVisualizer {
 			}
 			byteHolder.set(os.toByteArray());
 		});
-		
+
 		return byteHolder.get();
 	}
-	
+
 	private void toPDFfromFOP(String fopInput, Supplier<OutputStream> outputStreamDelegate, Consumer<OutputStream> consumerDelegate) {
 
 		DefaultConfigurationBuilder cfgBuilder = new DefaultConfigurationBuilder();
@@ -402,7 +417,7 @@ public class ZUGFeRDVisualizer {
 
 			// Step 6: Start XSLT transformation and FOP processing
 			transformer.transform(src, res);
-			
+
 			consumerDelegate.accept(out);
 
 		} catch (FOPException | IOException | TransformerException e) {

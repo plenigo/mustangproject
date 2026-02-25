@@ -3,7 +3,7 @@
     <parent>
         <groupId>org.mustangproject</groupId>
         <artifactId>core</artifactId>
-        <version>2.21.1-SNAPSHOT</version>
+        <version>2.22.0</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>validator</artifactId>
@@ -66,7 +66,22 @@
             <artifactId>ph-schematron-xslt</artifactId>
             <version>${version.com.helger.schematron}</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.helger.commons</groupId>
+            <artifactId>ph-commons</artifactId>
+            <version>${version.com.helger.ph-commons}</version>
+        </dependency>
+        <!-- Needed for interfaces like com.helger.commons.io.IHasInputStream used transitively by ph-schematron -->
+        <dependency>
+            <groupId>com.helger.commons</groupId>
+            <artifactId>ph-io</artifactId>
+            <version>${version.com.helger.ph-commons}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.helger.commons</groupId>
+            <artifactId>ph-diagnostics</artifactId>
+            <version>${version.com.helger.ph-commons}</version>
+        </dependency>
         <!-- test dependencies -->
         <dependency>
             <groupId>org.xmlunit</groupId>

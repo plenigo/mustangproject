@@ -21,6 +21,7 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import com.helger.base.io.stream.StreamHelper;
 import org.apache.commons.io.IOUtils;
 import org.dom4j.DocumentException;
 import org.dom4j.DocumentHelper;
@@ -34,7 +35,6 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
-import com.helger.commons.io.stream.StreamHelper;
 
 import jakarta.xml.bind.DatatypeConverter;
 

@@ -386,7 +386,6 @@ public class ZUGFeRDInvoiceImporter {
 			for (int nodeIndex = 0; nodeIndex < UBLNotesNd.getLength(); nodeIndex++) {
 				includedNotes.add(IncludedNote.generalNote(UBLNotesNd.item(nodeIndex).getTextContent()));
 			}
-			zpp.addNotes(includedNotes);
 		}
 
 		XPathExpression shipExUBL = xpath.compile("//*[local-name()=\"Delivery\"]");
@@ -617,7 +616,7 @@ public class ZUGFeRDInvoiceImporter {
 			// //*[local-name()="Invoice" or local-name()="CreditNote"]
 			number = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"ID\"]").trim();
 			potentialCashDiscountTerms = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"PaymentTerms\"]/*[local-name()=\"Note\"]").trim();
-			typeCode = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"InvoiceTypeCode\"]").trim();
+			typeCode = extractString("/*[local-name()=\"Invoice\"]/*[local-name()=\"InvoiceTypeCode\"] | /*[local-name()=\"CreditNote\"]/*[local-name()=\"CreditNoteTypeCode\"]").trim();
 			String issueDateStr = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"IssueDate\"]").trim();
 			if (!issueDateStr.isEmpty()) {
 				issueDate = parseDate(issueDateStr, "yyyy-MM-dd");
@@ -634,7 +633,7 @@ public class ZUGFeRDInvoiceImporter {
 
 			}
 
-			String dueDt = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"DueDate\"]").trim();
+			String dueDt = extractString("/*[local-name()=\"Invoice\" or local-name()=\"CreditNote\"]/*[local-name()=\"DueDate\"] | /*[local-name()=\"CreditNote\"]/*[local-name()=\"PaymentMeans\"]/*[local-name()=\"PaymentDueDate\"]").trim();
 			if (!dueDt.isEmpty()) {
 				dueDate = parseDate(dueDt, "yyyy-MM-dd");
 			}
@@ -963,6 +962,16 @@ public class ZUGFeRDInvoiceImporter {
 						if ((paymentTermChilds.item(paymentTermChildIndex).getLocalName() != null) && (paymentTermChilds.item(paymentTermChildIndex).getLocalName().equals("ID"))) {
 							IBAN = XMLTools.trimOrNull(paymentTermChilds.item(paymentTermChildIndex));
 						}
+						if ((paymentTermChilds.item(paymentTermChildIndex).getLocalName() != null)
+							&& (paymentTermChilds.item(paymentTermChildIndex).getLocalName().equals("FinancialInstitutionBranch"))) {
+							NodeList branchChilds = paymentTermChilds.item(paymentTermChildIndex).getChildNodes();
+							for (int branchChildIndex = 0; branchChildIndex < branchChilds.getLength(); branchChildIndex++) {
+								if ((branchChilds.item(branchChildIndex).getLocalName() != null)
+									&& (branchChilds.item(branchChildIndex).getLocalName().equals("ID"))) {
+									BIC = XMLTools.trimOrNull(branchChilds.item(branchChildIndex));
+								}
+							}
+						}
 					}
 				}
 				if ((paymentMeansChilds.item(meansChildIndex).getLocalName() != null)
@@ -978,6 +987,9 @@ public class ZUGFeRDInvoiceImporter {
 			}
 			if (IBAN != null) {
 				BankDetails bd = new BankDetails(IBAN);
+				if (BIC != null) {
+					bd.setBIC(BIC);
+				}
 				if (accountName != null) {
 					bd.setAccountName(accountName);
 				}
@@ -1070,7 +1082,7 @@ public class ZUGFeRDInvoiceImporter {
 			}
 		}
 
-		String rounding = extractString("//*[local-name()=\"SpecifiedTradeSettlementHeaderMonetarySummation\"]/*[local-name()=\"RoundingAmount\"]|//*[local-name()=\"LegalMonetaryTotal\"]/*[local-name()=\"Party\"]/*[local-name()=\"PayableRoundingAmount\"]");
+		String rounding = extractString("//*[local-name()=\"SpecifiedTradeSettlementHeaderMonetarySummation\"]/*[local-name()=\"RoundingAmount\"]|//*[local-name()=\"LegalMonetaryTotal\"]/*[local-name()=\"PayableRoundingAmount\"]");
 		if (!rounding.isEmpty()) {
 			zpp.setRoundingAmount(new BigDecimal(rounding.trim()));
 		}
@@ -1085,7 +1097,7 @@ public class ZUGFeRDInvoiceImporter {
 			zpp.setReferenceNumber(buyerReference);
 		}
 
-		xpr = xpath.compile("//*[local-name()=\"IncludedSupplyChainTradeLineItem\"]|//*[local-name()=\"InvoiceLine\"]");
+		xpr = xpath.compile("//*[local-name()=\"IncludedSupplyChainTradeLineItem\"]|//*[local-name()=\"InvoiceLine\"]|//*[local-name()=\"CreditNoteLine\"]");
 		nodes = (NodeList) xpr.evaluate(getDocument(), XPathConstants.NODESET);
 
 		if (nodes.getLength() != 0) {
