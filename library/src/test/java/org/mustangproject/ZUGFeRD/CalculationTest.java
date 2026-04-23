@@ -1,26 +1,35 @@
 package org.mustangproject.ZUGFeRD;
 
-import static java.math.BigDecimal.TEN;
-import static java.math.BigDecimal.valueOf;
-import static org.junit.Assert.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.xmlunit.assertj.XmlAssert.assertThat;
-
 import org.junit.Test;
-import org.mustangproject.*;
+import org.mustangproject.Allowance;
+import org.mustangproject.BankDetails;
+import org.mustangproject.Charge;
+import org.mustangproject.Contact;
+import org.mustangproject.Invoice;
+import org.mustangproject.Item;
+import org.mustangproject.Product;
+import org.mustangproject.TradeParty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xmlunit.builder.Input;
+import org.w3c.dom.Document;
 
-import javax.xml.transform.Source;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathExpressionException;
-import java.io.*;
+import javax.xml.xpath.XPathFactory;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+
+import static java.math.BigDecimal.TEN;
+import static java.math.BigDecimal.valueOf;
+import static org.xmlunit.assertj.XmlAssert.assertThat;
 
 /***
  * tests the linecalculator and transactioncalculator classes
@@ -281,7 +290,7 @@ public class CalculationTest extends ResourceCase {
 		/* item */
 		Product product;
 		Item item;
-		BigDecimal amount=new BigDecimal("10.00");
+		BigDecimal amount = new BigDecimal("10.00");
 
 		product = new Product("AAA", "", "H87", BigDecimal.ZERO).setSellerAssignedID("1AAA");
 		product.addCharge(new Charge(amount).setReasonCode("ZZZ").setReason("Zuschlag"));
@@ -289,8 +298,8 @@ public class CalculationTest extends ResourceCase {
 		item = new Item(product, new BigDecimal("4.750"), new BigDecimal(1.00));
 
 		// set values for additional charge and discount used for next lines
-			item.addCharge(new Charge(amount).setReasonCode("ZZZ").setReason("Zuschlag"));
-			item.addAllowance((Allowance) new Allowance(amount).setReasonCode("95").setReason("Rabatt"));
+		item.addCharge(new Charge(amount).setReasonCode("ZZZ").setReason("Zuschlag"));
+		item.addAllowance((Allowance) new Allowance(amount).setReasonCode("95").setReason("Rabatt"));
 		invoice.addItem(item);
 
 		TransactionCalculator calculator = new TransactionCalculator(invoice);
@@ -421,7 +430,7 @@ public class CalculationTest extends ResourceCase {
 			.addItem(new Item(new Product("Testprodukt", "", "H87", new BigDecimal(19)), price, new BigDecimal(1.0)))
 			.addItem(new Item(new Product("Testprodukt", "", "H87", new BigDecimal(19)), price, new BigDecimal(1.0)))
 			.addItem(new Item(new Product("Testprodukt", "", "H87", new BigDecimal(19)), price, new BigDecimal(1.0)))
-				.addCharge(new Charge().setPercent(new BigDecimal(50)).setTaxPercent(new BigDecimal(19)).setReasonCode("ABK"));
+			.addCharge(new Charge().setPercent(new BigDecimal(50)).setTaxPercent(new BigDecimal(19)).setReasonCode("ABK"));
 		// 9+50%=>13,50 expected net
 		//		.addAllowance(new Allowance().setPercent(new BigDecimal(50)).setTaxPercent(new BigDecimal(19)).setReason("Mengenrabatt"))
 		TransactionCalculator tc = new TransactionCalculator(i);
@@ -510,6 +519,161 @@ public class CalculationTest extends ResourceCase {
 			.setProduct(product);
 		final LineCalculator calculator = currentItem.getCalculation();
 		assertEquals(BigDecimal.valueOf(32.74), calculator.getItemTotalNetAmount());
+	}
+
+	/**
+	 * {@link Item#setGrossPrice(java.math.BigDecimal) Gross price} 4.99 € is the <strong>unit list price
+	 * including VAT</strong> (here 7 %) <strong>before</strong> any discount — same meaning as
+	 * {@link IZUGFeRDExportableItem#getGrossPrice()}: incl. taxes, excl. allowances/charges.
+	 * The 13 % product allowance is then applied on that VAT-inclusive unit with per-step rounding;
+	 * net ex VAT and CII gross/net (PEPPOL-EN16931-R046) follow from that pipeline.
+	 * Full XRechnung/CII rules validation: {@code GrossInclusiveXRechnungCIIValidationTest} in the {@code validator} module
+	 * (run e.g. {@code mvn test -pl validator -am -Dtest=...GrossInclusive... -Dsurefire.failIfNoSpecifiedTests=false}).
+	 */
+	@Test
+	public void testGrossInclusiveVatPercentDiscountPerUnitXmlMatchesTotalsAndPeppolR046() throws Exception {
+		SimpleDateFormat sqlDate = new SimpleDateFormat("yyyy-MM-dd");
+		TradeParty recipient = new TradeParty("Buyer GmbH", "Käuferweg 2", "80331", "München", "DE");
+		recipient.setID("991-01484-64");
+		recipient.setEmail("buyer@example.org");
+		recipient.addVATID("DE999999999");
+		Product product = new Product("Artikel", "", "H87", new BigDecimal("7"));
+		Allowance lineDiscount = new Allowance();
+		lineDiscount.setPercent(new BigDecimal("13"));
+		lineDiscount.setTaxPercent(new BigDecimal("7"));
+		lineDiscount.setReasonCode("95");
+		lineDiscount.setReason("Rabatt");
+		product.addAllowance(lineDiscount);
+		// 4.99 € = one unit, VAT-inclusive list price, no discount applied yet (discount is the 13 % allowance below).
+		Item item = new Item(product, BigDecimal.ZERO, new BigDecimal("9")).setGrossPrice(new BigDecimal("4.99"));
+
+		LineCalculator lc = item.getCalculation();
+		assertEquals(0, new BigDecimal("36.54").compareTo(lc.getItemTotalNetAmount()));
+		assertEquals(0, new BigDecimal("2.52").compareTo(lc.getItemTotalVATAmount()));
+		assertEquals(0, new BigDecimal("4.06").compareTo(lc.getPrice()));
+		assertEquals(0, new BigDecimal("4.66").compareTo(lc.getPriceGross()));
+
+		Invoice invoice = new Invoice()
+			.setDocumentName("Rechnung")
+			.setCurrency("EUR")
+			.setDueDate(sqlDate.parse("2026-05-23"))
+			.setIssueDate(sqlDate.parse("2026-04-23"))
+			.setDeliveryDate(sqlDate.parse("2026-04-23"))
+			.setSender(new TradeParty("Seller GmbH", "Verkäuferstr. 1", "10115", "Berlin", "DE")
+				.addTaxID("201/113/40209")
+				.addVATID("DE115235681")
+				.setEmail("seller@example.org")
+				.setContact(new Contact("Hans Test", "+493012345678", "seller@example.org"))
+				.addBankDetails(new BankDetails("DE12500105170648489890", "COBADEFXXX").setAccountName("Seller GmbH")))
+			.setRecipient(recipient)
+			.setReferenceNumber("991-01484-64")
+			.setNumber("INV-R046-1")
+			.addItem(item);
+
+		TransactionCalculator tc = new TransactionCalculator(invoice);
+		assertEquals(0, new BigDecimal("36.54").compareTo(tc.getTaxBasis()));
+		assertEquals(0, new BigDecimal("39.06").compareTo(tc.getGrandTotal()));
+		assertEquals(0, new BigDecimal("2.52").compareTo(tc.getGrandTotal().subtract(tc.getTaxBasis())));
+
+		ZUGFeRD2PullProvider zf2p = new ZUGFeRD2PullProvider();
+		zf2p.setProfile(Profiles.getByName("XRechnung"));
+		zf2p.generateXML(invoice);
+		String theXML = new String(zf2p.getXML(), StandardCharsets.UTF_8);
+		// Schematron / EN16931 rules via ZUGFeRDValidator: same scenario in validator module
+		// (org.mustangproject.validator.GrossInclusiveXRechnungCIIValidationTest) — not inlined here because a
+		// test dependency library → validator would create a Maven reactor cycle (validator already depends on library).
+		// Example:
+		// ZUGFeRDValidator zfValidator = new ZUGFeRDValidator();
+		// String result = zfValidator.validate(zf2p.getXML(), "xrechnung-" + invoice.getNumber() + ".xml");
+		// assertThat(result).valueByXPath("/validation/xml/summary/@status").isEqualTo("valid");
+		// assertThat(result).valueByXPath("/validation/summary/@status").isEqualTo("valid");
+
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+		dbf.setNamespaceAware(true);
+		Document doc = dbf.newDocumentBuilder().parse(new ByteArrayInputStream(theXML.getBytes(StandardCharsets.UTF_8)));
+		XPath xp = XPathFactory.newInstance().newXPath();
+		String grossStr = xp.evaluate(
+			"(//*[local-name()='IncludedSupplyChainTradeLineItem'])[1]//*[local-name()='GrossPriceProductTradePrice']//*[local-name()='ChargeAmount']/text()",
+			doc).trim();
+		String allowanceStr = xp.evaluate(
+			"(//*[local-name()='IncludedSupplyChainTradeLineItem'])[1]//*[local-name()='GrossPriceProductTradePrice']//*[local-name()='AppliedTradeAllowanceCharge']//*[local-name()='ActualAmount']/text()",
+			doc).trim();
+		String netStr = xp.evaluate(
+			"(//*[local-name()='IncludedSupplyChainTradeLineItem'])[1]//*[local-name()='NetPriceProductTradePrice']//*[local-name()='ChargeAmount']/text()",
+			doc).trim();
+		BigDecimal grossUnit = new BigDecimal(grossStr);
+		BigDecimal allowanceUnit = new BigDecimal(allowanceStr);
+		BigDecimal netUnit = new BigDecimal(netStr);
+		assertEquals(0, grossUnit.subtract(allowanceUnit).compareTo(netUnit));
+
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='IncludedSupplyChainTradeLineItem'][1]//*[local-name()='SpecifiedTradeSettlementLineMonetarySummation']//*[local-name()='LineTotalAmount']").asString().isEqualTo("36.54");
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='ApplicableHeaderTradeSettlement']//*[local-name()='SpecifiedTradeSettlementHeaderMonetarySummation']//*[local-name()='TaxBasisTotalAmount']").asString().isEqualTo("36.54");
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='ApplicableHeaderTradeSettlement']//*[local-name()='SpecifiedTradeSettlementHeaderMonetarySummation']//*[local-name()='GrandTotalAmount']").asString().isEqualTo("39.06");
+	}
+
+	/**
+	 * Same VAT-inclusive list unit (4.99 €) and quantity as the discount scenario, but <strong>no</strong> allowances:
+	 * net unit ex VAT is the list price (4.66 €); VAT is derived as line gross incl. VAT minus line net (legacy path in
+	 * {@link LineCalculator} when no percentage line adjustments exist). CII has no {@code GrossPriceProductTradePrice} block.
+	 * Validator: {@code GrossInclusiveXRechnungCIIValidationTest#testGrossInclusiveNoDiscountXmlValidatesWithZugferdValidator}.
+	 */
+	@Test
+	public void testGrossInclusiveNoDiscountXmlAndTotals() throws Exception {
+		SimpleDateFormat sqlDate = new SimpleDateFormat("yyyy-MM-dd");
+		TradeParty recipient = new TradeParty("Buyer GmbH", "Käuferweg 2", "80331", "München", "DE");
+		recipient.setID("991-01484-64");
+		recipient.setEmail("buyer@example.org");
+		recipient.addVATID("DE999999999");
+		Product product = new Product("Artikel ohne Rabatt", "", "H87", new BigDecimal("7"));
+		Item item = new Item(product, new BigDecimal("4.66"), new BigDecimal("9")).setGrossPrice(new BigDecimal("4.99"));
+
+		LineCalculator lc = item.getCalculation();
+		assertEquals(0, new BigDecimal("4.66").compareTo(lc.getPrice()));
+		assertEquals(0, new BigDecimal("4.66").compareTo(lc.getPriceGross()));
+		assertEquals(0, new BigDecimal("41.94").compareTo(lc.getItemTotalNetAmount()));
+		assertEquals(0, new BigDecimal("2.97").compareTo(lc.getItemTotalVATAmount()));
+
+		Invoice invoice = new Invoice()
+			.setDocumentName("Rechnung")
+			.setCurrency("EUR")
+			.setDueDate(sqlDate.parse("2026-05-23"))
+			.setIssueDate(sqlDate.parse("2026-04-23"))
+			.setDeliveryDate(sqlDate.parse("2026-04-23"))
+			.setSender(new TradeParty("Seller GmbH", "Verkäuferstr. 1", "10115", "Berlin", "DE")
+				.addTaxID("201/113/40209")
+				.addVATID("DE115235681")
+				.setEmail("seller@example.org")
+				.setContact(new Contact("Hans Test", "+493012345678", "seller@example.org"))
+				.addBankDetails(new BankDetails("DE12500105170648489890", "COBADEFXXX").setAccountName("Seller GmbH")))
+			.setRecipient(recipient)
+			.setReferenceNumber("991-01484-64")
+			.setNumber("INV-NO-DISC-1")
+			.addItem(item);
+
+		TransactionCalculator tc = new TransactionCalculator(invoice);
+		assertEquals(0, new BigDecimal("41.94").compareTo(tc.getTaxBasis()));
+		assertEquals(0, new BigDecimal("44.91").compareTo(tc.getGrandTotal()));
+
+		ZUGFeRD2PullProvider zf2p = new ZUGFeRD2PullProvider();
+		zf2p.setProfile(Profiles.getByName("XRechnung"));
+		zf2p.generateXML(invoice);
+		String theXML = new String(zf2p.getXML(), StandardCharsets.UTF_8);
+
+		assertThat(theXML).valueByXPath(
+			"count(//*[local-name()='IncludedSupplyChainTradeLineItem'][1]//*[local-name()='GrossPriceProductTradePrice'])")
+			.asInt()
+			.isEqualTo(0);
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='IncludedSupplyChainTradeLineItem'][1]//*[local-name()='NetPriceProductTradePrice']//*[local-name()='ChargeAmount']").asDouble().isEqualTo(4.66);
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='IncludedSupplyChainTradeLineItem'][1]//*[local-name()='SpecifiedTradeSettlementLineMonetarySummation']//*[local-name()='LineTotalAmount']").asString().isEqualTo("41.94");
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='ApplicableHeaderTradeSettlement']//*[local-name()='SpecifiedTradeSettlementHeaderMonetarySummation']//*[local-name()='TaxBasisTotalAmount']").asString().isEqualTo("41.94");
+		assertThat(theXML).valueByXPath(
+			"//*[local-name()='ApplicableHeaderTradeSettlement']//*[local-name()='SpecifiedTradeSettlementHeaderMonetarySummation']//*[local-name()='GrandTotalAmount']").asString().isEqualTo("44.91");
 	}
 
 }

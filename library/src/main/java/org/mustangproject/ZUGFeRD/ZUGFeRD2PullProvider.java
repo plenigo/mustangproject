@@ -275,6 +275,16 @@ public class ZUGFeRD2PullProvider implements IXMLProvider {
 	 * @return CII XML
 	 */
 	protected String getAllowanceChargeStr(IZUGFeRDAllowanceCharge allowance, IAbsoluteValueProvider item) {
+		return getAllowanceChargeStr(allowance, item, null);
+	}
+
+	/**
+	 * Gross price level allowance: PEPPOL-EN16931-R046 requires per-unit {@code ActualAmount} such that
+	 * net unit price = gross unit price − allowance (BT-146 = BT-148 − BT-147). When line totals use
+	 * VAT-inclusive gross with per-unit rounded percentage steps, {@link LineCalculator} encodes that;
+	 * emit the matching ex-VAT allowance amount here instead of the line-total discount.
+	 */
+	protected String getAllowanceChargeStr(IZUGFeRDAllowanceCharge allowance, IAbsoluteValueProvider item, LineCalculator lc) {
 		String percentage = "";
 		String chargeIndicator = "false";
 		if ((allowance.getPercent() != null) && (profile == Profiles.getByName("Extended"))) {
@@ -294,13 +304,36 @@ public class ZUGFeRD2PullProvider implements IXMLProvider {
 			// only in XRechnung profile
 			reasonCode = "<ram:ReasonCode>" + allowance.getReasonCode() + "</ram:ReasonCode>";
 		}
+		final BigDecimal actualAmount = resolveGrossPriceAppliedAllowanceActualAmount(allowance, item, lc);
 		final String allowanceChargeStr = "<ram:AppliedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>" +
 			chargeIndicator + "</udt:Indicator></ram:ChargeIndicator>" + percentage +
-			"<ram:ActualAmount>" + priceFormat(allowance.getTotalAmount(item)) + "</ram:ActualAmount>" +
+			"<ram:ActualAmount>" + priceFormat(actualAmount) + "</ram:ActualAmount>" +
 			reasonCode +
 			reason +
 			"</ram:AppliedTradeAllowanceCharge>";
 		return allowanceChargeStr;
+	}
+
+	private static BigDecimal resolveGrossPriceAppliedAllowanceActualAmount(IZUGFeRDAllowanceCharge allowance, IAbsoluteValueProvider item, LineCalculator lc) {
+		if (shouldEmitSingleProductAllowanceAsGrossMinusNet(lc, item, allowance)) {
+			return lc.getPriceGross().subtract(lc.getPrice());
+		}
+		return allowance.getTotalAmount(item);
+	}
+
+	private static boolean shouldEmitSingleProductAllowanceAsGrossMinusNet(LineCalculator lc, IAbsoluteValueProvider item, IZUGFeRDAllowanceCharge allowance) {
+		if (lc == null || !lc.isGrossInclusivePerUnitRounding() || allowance.isCharge()) {
+			return false;
+		}
+		if (!(item instanceof IZUGFeRDExportableItem)) {
+			return false;
+		}
+		IZUGFeRDExportableItem ei = (IZUGFeRDExportableItem) item;
+		if (ei.getProduct() == null || ei.getProduct().getAllowances() == null) {
+			return false;
+		}
+		IZUGFeRDAllowanceCharge[] pa = ei.getProduct().getAllowances();
+		return pa.length == 1 && pa[0] == allowance && allowance.getPercent() != null;
 	}
 
 	/***
@@ -497,12 +530,12 @@ public class ZUGFeRD2PullProvider implements IXMLProvider {
 				String allowanceChargeStr = "";
 				if (currentItem.getProduct().getAllowances() != null && currentItem.getProduct().getAllowances().length > 0) {
 					for (final IZUGFeRDAllowanceCharge allowance : currentItem.getProduct().getAllowances()) {
-						allowanceChargeStr += getAllowanceChargeStr(allowance, currentItem);
+						allowanceChargeStr += getAllowanceChargeStr(allowance, currentItem, lc);
 					}
 				}
 				if (currentItem.getProduct().getCharges() != null && currentItem.getProduct().getCharges().length > 0) {
 					for (final IZUGFeRDAllowanceCharge charge : currentItem.getProduct().getCharges()) {
-						allowanceChargeStr += getAllowanceChargeStr(charge, currentItem);
+						allowanceChargeStr += getAllowanceChargeStr(charge, currentItem, lc);
 					}
 				}
 				if (!allowanceChargeStr.isEmpty()) {
