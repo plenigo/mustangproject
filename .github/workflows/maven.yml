@@ -15,8 +15,8 @@ jobs:
     - uses: actions/checkout@v3
     - uses: actions/setup-java@v3 # the log states the default ~/.m2/toolchains.xml is being created pointing to the JDK
       with:
-        distribution: 'adopt' # for latest JDKs use temurin https://blog.adoptopenjdk.net/2021/08/goodbye-adoptopenjdk-hello-adoptium/
-        java-version: '11'
+        distribution: 'temurin' # adopt only ships up to JDK 16, see https://blog.adoptopenjdk.net/2021/08/goodbye-adoptopenjdk-hello-adoptium/
+        java-version: '17' # ph-commons 12.x, en16931-cii2ubl 3.x and Saxon 13 are compiled for Java 17
         cache: 'maven' #cache/restore any dependencies to improve the workflow execution time
     - name: Build with Maven
       run: mvn -B package --file pom.xml
