@@ -1,15 +1,17 @@
 package org.mustangproject.ZUGFeRD;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Arrays;
-import java.util.List;
 
 /***
  * the linecalculator does the math within an item line, and e.g. calculates quantity*price.
  * @see TransactionCalculator
  */
 public class LineCalculator {
+	private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
+
 	protected BigDecimal price;
 	protected BigDecimal priceGross;
 	protected BigDecimal itemTotalNetAmount;
@@ -19,12 +21,39 @@ public class LineCalculator {
 	protected BigDecimal itemAllowance = BigDecimal.ZERO;
 	protected BigDecimal itemCharge = BigDecimal.ZERO;
 	protected BigDecimal allowanceItemTotal = BigDecimal.ZERO;
+	/**
+	 * When true, list price was taken as VAT-inclusive ({@link IZUGFeRDExportableItem#getGrossPrice()}),
+	 * percentage allowances/charges were applied per unit with HALF_UP scale 2 on the running gross,
+	 * then net ex VAT was derived per unit — matching common POS rounding and PEPPOL gross/net price
+	 * consistency when exporting {@link org.mustangproject.ZUGFeRD.ZUGFeRD2PullProvider}.
+	 */
+	@JsonIgnore
+	protected boolean grossInclusivePerUnitRounding = false;
 
 	public LineCalculator(IZUGFeRDExportableItem currentItem) {
-		// Compute basisQuantity first so it can be used for item-level allowance/charge context
+
+		BigDecimal vatPercent = null;
+		if (currentItem.getProduct() != null) {
+			vatPercent = currentItem.getProduct().getVATPercent();
+		}
+		if (vatPercent == null) {
+			vatPercent = BigDecimal.ZERO;
+		}
+		BigDecimal multiplicator = vatPercent.divide(BigDecimal.valueOf(100));
+
+		BigDecimal quantity = BigDecimal.ZERO;
+		if ((currentItem != null) && (currentItem.getQuantity() != null)) {
+			quantity = currentItem.getQuantity();
+		}
+
 		BigDecimal basisQuantity = currentItem.getBasisQuantity().compareTo(BigDecimal.ZERO) == 0
 			? BigDecimal.ONE.setScale(4)
 			: currentItem.getBasisQuantity();
+
+		if (eligibleForGrossInclusivePerUnitRounding(currentItem, vatPercent)) {
+			computeGrossInclusivePerUnitRounding(currentItem, vatPercent, quantity, basisQuantity);
+			return;
+		}
 
 		// Provider for item-level: getValue() returns price/basisQty so percentage
 		// allowances compute against the actual line amount (qty * price / basisQty),
@@ -58,20 +87,6 @@ public class LineCalculator {
 			for (final IZUGFeRDAllowanceCharge itemTotalAllowance : currentItem.getItemTotalAllowances()) {
 				addAllowanceItemTotal(itemTotalAllowance.getTotalAmount(itemBasisProvider));
 			}
-		}
-
-		BigDecimal vatPercent = null;
-		if (currentItem.getProduct() != null) {
-			vatPercent = currentItem.getProduct().getVATPercent();
-		}
-		if (vatPercent == null) {
-			vatPercent = BigDecimal.ZERO;
-		}
-		BigDecimal multiplicator = vatPercent.divide(BigDecimal.valueOf(100));
-
-		BigDecimal quantity = BigDecimal.ZERO;
-		if ((currentItem != null) && (currentItem.getQuantity() != null)) {
-			quantity = currentItem.getQuantity();
 		}
 
 		price = currentItem.getPrice();
@@ -120,6 +135,154 @@ public class LineCalculator {
 			}
 			itemTotalVATAmount = itemTotalNetAmount.multiply(multiplicator);
 		}
+	}
+
+	private static boolean eligibleForGrossInclusivePerUnitRounding(IZUGFeRDExportableItem currentItem, BigDecimal vatPercent) {
+		if (currentItem.getGrossPrice() == null) {
+			return false;
+		}
+		if (vatPercent.compareTo(BigDecimal.ZERO) <= 0) {
+			return false;
+		}
+		if (hasNonPercentLinePriceAdjustments(currentItem)) {
+			return false;
+		}
+		return hasPercentAllowanceOrChargeOnLine(currentItem);
+	}
+
+	private static boolean hasNonPercentLinePriceAdjustments(IZUGFeRDExportableItem currentItem) {
+		if (currentItem.getItemTotalAllowances() != null) {
+			for (IZUGFeRDAllowanceCharge a : currentItem.getItemTotalAllowances()) {
+				if (a.getPercent() == null) {
+					return true;
+				}
+			}
+		}
+		if (currentItem.getItemAllowances() != null) {
+			for (IZUGFeRDAllowanceCharge a : currentItem.getItemAllowances()) {
+				if (a.getPercent() == null) {
+					return true;
+				}
+			}
+		}
+		if (currentItem.getItemCharges() != null) {
+			for (IZUGFeRDAllowanceCharge c : currentItem.getItemCharges()) {
+				if (c.getPercent() == null) {
+					return true;
+				}
+			}
+		}
+		if (currentItem.getProduct() != null) {
+			if (currentItem.getProduct().getAllowances() != null) {
+				for (IZUGFeRDAllowanceCharge a : currentItem.getProduct().getAllowances()) {
+					if (a.getPercent() == null) {
+						return true;
+					}
+				}
+			}
+			if (currentItem.getProduct().getCharges() != null) {
+				for (IZUGFeRDAllowanceCharge c : currentItem.getProduct().getCharges()) {
+					if (c.getPercent() == null) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean hasPercentAllowanceOrChargeOnLine(IZUGFeRDExportableItem currentItem) {
+		if (currentItem.getItemAllowances() != null) {
+			for (IZUGFeRDAllowanceCharge a : currentItem.getItemAllowances()) {
+				if (a.getPercent() != null) {
+					return true;
+				}
+			}
+		}
+		if (currentItem.getItemCharges() != null) {
+			for (IZUGFeRDAllowanceCharge c : currentItem.getItemCharges()) {
+				if (c.getPercent() != null) {
+					return true;
+				}
+			}
+		}
+		if (currentItem.getProduct() != null) {
+			if (currentItem.getProduct().getAllowances() != null) {
+				for (IZUGFeRDAllowanceCharge a : currentItem.getProduct().getAllowances()) {
+					if (a.getPercent() != null) {
+						return true;
+					}
+				}
+			}
+			if (currentItem.getProduct().getCharges() != null) {
+				for (IZUGFeRDAllowanceCharge c : currentItem.getProduct().getCharges()) {
+					if (c.getPercent() != null) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	private void computeGrossInclusivePerUnitRounding(IZUGFeRDExportableItem currentItem, BigDecimal vatPercent,
+	                                                  BigDecimal quantity, BigDecimal basisQuantity) {
+		grossInclusivePerUnitRounding = true;
+		BigDecimal vatFactor = BigDecimal.ONE.add(vatPercent.divide(ONE_HUNDRED, 10, RoundingMode.HALF_UP));
+		BigDecimal listGrossInclVAT = currentItem.getGrossPrice();
+		BigDecimal runningGrossInclVAT = listGrossInclVAT;
+
+		if (currentItem.getProduct() != null && currentItem.getProduct().getAllowances() != null) {
+			for (IZUGFeRDAllowanceCharge allowance : currentItem.getProduct().getAllowances()) {
+				if (allowance.getPercent() != null) {
+					BigDecimal step = runningGrossInclVAT.multiply(allowance.getPercent()).divide(ONE_HUNDRED, 10, RoundingMode.HALF_UP)
+						.setScale(2, RoundingMode.HALF_UP);
+					runningGrossInclVAT = runningGrossInclVAT.subtract(step);
+				}
+			}
+		}
+		if (currentItem.getProduct() != null && currentItem.getProduct().getCharges() != null) {
+			for (IZUGFeRDAllowanceCharge charge : currentItem.getProduct().getCharges()) {
+				if (charge.getPercent() != null) {
+					BigDecimal step = runningGrossInclVAT.multiply(charge.getPercent()).divide(ONE_HUNDRED, 10, RoundingMode.HALF_UP)
+						.setScale(2, RoundingMode.HALF_UP);
+					runningGrossInclVAT = runningGrossInclVAT.add(step);
+				}
+			}
+		}
+		if (currentItem.getItemAllowances() != null) {
+			for (IZUGFeRDAllowanceCharge allowance : currentItem.getItemAllowances()) {
+				if (allowance.getPercent() != null) {
+					BigDecimal step = runningGrossInclVAT.multiply(allowance.getPercent()).divide(ONE_HUNDRED, 10, RoundingMode.HALF_UP)
+						.setScale(2, RoundingMode.HALF_UP);
+					runningGrossInclVAT = runningGrossInclVAT.subtract(step);
+				}
+			}
+		}
+		if (currentItem.getItemCharges() != null) {
+			for (IZUGFeRDAllowanceCharge charge : currentItem.getItemCharges()) {
+				if (charge.getPercent() != null) {
+					BigDecimal step = runningGrossInclVAT.multiply(charge.getPercent()).divide(ONE_HUNDRED, 10, RoundingMode.HALF_UP)
+						.setScale(2, RoundingMode.HALF_UP);
+					runningGrossInclVAT = runningGrossInclVAT.add(step);
+				}
+			}
+		}
+
+		BigDecimal unitNetExVAT = runningGrossInclVAT.divide(vatFactor, 10, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP);
+		BigDecimal effQty = quantity.divide(basisQuantity, 10, RoundingMode.HALF_UP);
+
+		itemTotalNetAmount = unitNetExVAT.multiply(effQty).setScale(2, RoundingMode.HALF_UP);
+		BigDecimal lineGrossInclVATAfter = runningGrossInclVAT.multiply(effQty).setScale(2, RoundingMode.HALF_UP);
+		itemTotalVATAmount = lineGrossInclVATAfter.subtract(itemTotalNetAmount).setScale(2, RoundingMode.HALF_UP);
+
+		price = unitNetExVAT;
+		priceGross = listGrossInclVAT.divide(vatFactor, 10, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP);
+		allowanceItemTotal = BigDecimal.ZERO;
+	}
+
+	public boolean isGrossInclusivePerUnitRounding() {
+		return grossInclusivePerUnitRounding;
 	}
 
 	public BigDecimal getPrice() {
