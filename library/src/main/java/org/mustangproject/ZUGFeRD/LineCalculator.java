@@ -55,44 +55,67 @@ public class LineCalculator {
 			return;
 		}
 
+		// Provider for item-level: getValue() returns price/basisQty so percentage
+		// allowances compute against the actual line amount (qty * price / basisQty),
+		// not the raw (qty * price). No effect on absolute amounts.
+		IAbsoluteValueProvider itemBasisProvider = new IAbsoluteValueProvider() {
+			@Override
+			public BigDecimal getValue() {
+				return currentItem.getPrice().divide(basisQuantity, 18, RoundingMode.HALF_UP);
+			}
+			@Override
+			public BigDecimal getQuantity() {
+				return currentItem.getQuantity();
+			}
+		};
+
 		if (currentItem.getItemAllowances() != null) {
 			for (IZUGFeRDAllowanceCharge allowance : currentItem.getItemAllowances()) {
-				BigDecimal singleAllowance = allowance.getTotalAmount(currentItem);
+				BigDecimal singleAllowance = allowance.getTotalAmount(itemBasisProvider);
 				addItemAllowance(singleAllowance);
 				addAllowanceItemTotal(singleAllowance);
-
 			}
 		}
 		if (currentItem.getItemCharges() != null) {
 			for (IZUGFeRDAllowanceCharge charge : currentItem.getItemCharges()) {
-				BigDecimal singleCharge = charge.getTotalAmount(currentItem);
+				BigDecimal singleCharge = charge.getTotalAmount(itemBasisProvider);
 				addItemCharge(singleCharge);
 				subtractAllowanceItemTotal(singleCharge);
-
 			}
 		}
 		if (currentItem.getItemTotalAllowances() != null) {
 			for (final IZUGFeRDAllowanceCharge itemTotalAllowance : currentItem.getItemTotalAllowances()) {
-				addAllowanceItemTotal(itemTotalAllowance.getTotalAmount(currentItem));
+				addAllowanceItemTotal(itemTotalAllowance.getTotalAmount(itemBasisProvider));
 			}
 		}
 
 		price = currentItem.getPrice();
 		priceGross = price;
-//		price=price.subtract(itemAllowance).add(itemCharge);
-//		BigDecimal delta=charge.subtract(allowanceItemTotal).subtract(allowance);
-//		delta=delta.divide(currentItem.getQuantity(), 18, RoundingMode.HALF_UP);
+
+		// Provider for product-level: getQuantity() returns ONE because product
+		// allowances adjust the per-unit price, not the line total.
+		// No effect on absolute amounts.
+		IAbsoluteValueProvider perUnitProvider = new IAbsoluteValueProvider() {
+			@Override
+			public BigDecimal getValue() {
+				return currentItem.getPrice();
+			}
+			@Override
+			public BigDecimal getQuantity() {
+				return BigDecimal.ONE;
+			}
+		};
 
 		BigDecimal delta = BigDecimal.ZERO;
 		if (currentItem.getProduct() != null) {
 			if (currentItem.getProduct().getAllowances() != null) {
 				for (IZUGFeRDAllowanceCharge ccaf : currentItem.getProduct().getAllowances()) {
-					delta = delta.subtract(ccaf.getTotalAmount(currentItem));
+					delta = delta.subtract(ccaf.getTotalAmount(perUnitProvider));
 				}
 			}
 			if (currentItem.getProduct().getCharges() != null) {
 				for (IZUGFeRDAllowanceCharge ccaf : currentItem.getProduct().getCharges()) {
-					delta = delta.add(ccaf.getTotalAmount(currentItem));
+					delta = delta.add(ccaf.getTotalAmount(perUnitProvider));
 				}
 			}
 		}
@@ -107,7 +130,10 @@ public class LineCalculator {
 				.setScale(2, RoundingMode.HALF_UP);
 			itemTotalVATAmount = itemTotalGrossAmount.subtract(itemTotalNetAmount).setScale(2, RoundingMode.HALF_UP);
 		} else {
-			itemTotalVATAmount = itemTotalNetAmount.multiply(multiplicator);//.setScale(2, RoundingMode.HALF_UP);
+			if (BigDecimal.ZERO.setScale(2).equals(itemTotalNetAmount) && "GROUP".equals(currentItem.getLineStatusReasonCode())) {
+				itemTotalNetAmount = currentItem.getLineTotalAmount();
+			}
+			itemTotalVATAmount = itemTotalNetAmount.multiply(multiplicator);
 		}
 	}
 
@@ -298,7 +324,6 @@ public class LineCalculator {
 	public void addAllowanceItemTotal(BigDecimal b) {
 		allowanceItemTotal = allowanceItemTotal.add(b);
 	}
-
 	public void subtractAllowanceItemTotal(BigDecimal b) {
 		allowanceItemTotal = allowanceItemTotal.subtract(b);
 	}
